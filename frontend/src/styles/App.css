@@ -1,0 +1,181 @@
+/* app.css */
+:root {
+  /* Modern Gradient Theme */
+  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --gradient-secondary: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  --gradient-success: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  --gradient-warning: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
+  --gradient-danger: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
+  --gradient-ocean: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+  
+  /* Glass Morphism Variables */
+  --glass-bg: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.18);
+  --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+  --glass-blur: blur(20px);
+  
+  /* Base Colors - Light Theme */
+  --background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
+  --surface: #ffffff;
+  --primary: #6366f1;
+  --secondary: #8b5cf6;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --success: #10b981;
+  --info: #06b6d4;
+  --text: #1f2937;
+  --text-secondary: #6b7280;
+  --border: #e5e7eb;
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --sidebar-bg: rgba(255, 255, 255, 0.8);
+  --header-bg: rgba(255, 255, 255, 0.9);
+  
+  /* Shadows */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.15);
+  --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.2);
+  --shadow-neon: 0 0 20px rgba(99, 102, 241, 0.5);
+}
+
+[data-theme="dark"] {
+  /* Dark Theme with Gradients */
+  --background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  --surface: rgba(30, 41, 59, 0.7);
+  --primary: #818cf8;
+  --secondary: #a78bfa;
+  --danger: #f87171;
+  --warning: #fbbf24;
+  --success: #34d399;
+  --info: #22d3ee;
+  --text: #f8fafc;
+  --text-secondary: #94a3b8;
+  --border: rgba(148, 163, 184, 0.2);
+  --card-bg: rgba(30, 41, 59, 0.5);
+  --sidebar-bg: rgba(15, 23, 42, 0.8);
+  --header-bg: rgba(30, 41, 59, 0.9);
+  --glass-bg: rgba(30, 41, 59, 0.3);
+  --glass-border: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="ocean"] {
+  /* Ocean Theme */
+  --background: linear-gradient(135deg, #0c4a6e 0%, #1e3a8a 100%);
+  --surface: rgba(30, 58, 138, 0.7);
+  --primary: #06b6d4;
+  --secondary: #0ea5e9;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --success: #2dd4bf;
+  --info: #8b5cf6;
+  --text: #e0f2fe;
+  --text-secondary: #bae6fd;
+  --border: rgba(186, 230, 253, 0.2);
+  --card-bg: rgba(30, 58, 138, 0.5);
+  --sidebar-bg: rgba(12, 74, 110, 0.8);
+  --header-bg: rgba(30, 58, 138, 0.9);
+  --glass-bg: rgba(30, 58, 138, 0.3);
+  --glass-border: rgba(224, 242, 254, 0.1);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: var(--background);
+  color: var(--text);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}
+
+/* App Container */
+.app-container {
+  display: flex;
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Futuristic Background Effects */
+.app-container::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: 
+    radial-gradient(circle at 20% 80%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(139, 92, 246, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(6, 182, 212, 0.05) 0%, transparent 50%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Main Content */
+.main-content {
+  margin-left: 280px;
+  flex: 1;
+  transition: margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 100vh;
+  position: relative;
+}
+
+.sidebar.closed ~ .main-content {
+  margin-left: 80px;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+  .sidebar {
+    transform: translateX(-100%);
+  }
+  
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  
+  .sidebar.closed {
+    width: 280px;
+    transform: translateX(-100%);
+  }
+  
+  .main-content {
+    margin-left: 0;
+  }
+  
+  .sidebar.closed ~ .main-content,
+  .sidebar.open ~ .main-content {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 0;
+  }
+}
