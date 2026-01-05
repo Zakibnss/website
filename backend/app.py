@@ -1,24 +1,39 @@
 """
-Water Quality API - Fixed Database Issue
+Water Quality API - Supabase Backend
 """
 
 import os
 import logging
+from dotenv import load_dotenv
 
 print("=" * 80)
 print("🌊 Water Quality Monitoring System - Starting Up")
 print("=" * 80)
 
-# Set up paths before creating app
+# Load environment variables
+load_dotenv()
+
+# Check Supabase configuration
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("❌ ERROR: Missing Supabase configuration")
+    print("Please create a .env file with:")
+    print("SUPABASE_URL=https://sfxdncqldxgfssenmrql.supabase.co")
+    print("SUPABASE_SERVICE_KEY=your-service-key")
+    exit(1)
+
+print(f"🔗 Supabase URL: {SUPABASE_URL}")
+print(f"🔑 Supabase Key: {SUPABASE_KEY[:20]}...")
+
+# Set up paths
 base_dir = os.path.dirname(os.path.abspath(__file__))
-data_dir = os.path.join(base_dir, 'data')
 logs_dir = os.path.join(base_dir, 'logs')
 
 # Create directories
-os.makedirs(data_dir, exist_ok=True)
 os.makedirs(logs_dir, exist_ok=True)
 
-print(f"📁 Data directory: {data_dir}")
 print(f"📁 Logs directory: {logs_dir}")
 
 # Configure logging
@@ -32,26 +47,23 @@ logging.basicConfig(
 )
 
 # Now create the app
-from app import create_app, db
+try:
+    from app import create_app
+    app = create_app()
+    print("✅ Flask app created successfully")
+except Exception as e:
+    print(f"❌ Error creating Flask app: {e}")
+    exit(1)
 
-app = create_app()
-
-# Test database connection
-with app.app_context():
-    try:
-        # Create tables
-        db.create_all()
-        print("✅ Database tables created successfully")
-        
-        # Test connection
-        from sqlalchemy import text
-        db.session.execute(text('SELECT 1'))
-        db.session.close()
-        print("✅ Database connection successful")
-        
-    except Exception as e:
-        print(f"❌ Database error: {e}")
-        print("⚠️ Continuing without database...")
+# Test Supabase connection
+try:
+    from services.supabase_service import supabase_service
+    stats = supabase_service.get_statistics()
+    print(f"✅ Supabase connection successful")
+    print(f"📊 Current statistics: {stats['total_readings']} readings from {stats['unique_devices']} devices")
+except Exception as e:
+    print(f"⚠️ Supabase connection failed: {e}")
+    print("⚠️ Some features may not work properly")
 
 # Import ML integrator after app is created
 try:
@@ -67,6 +79,10 @@ if __name__ == '__main__':
     port = 5000
     
     print(f"\n🚀 Starting server on {host}:{port}")
+    print(f"📡 API Endpoint: http://{host}:{port}/api/sensor/data")
+    print(f"🏥 Health Check: http://{host}:{port}/api/health")
+    print("=" * 80)
+    print("✅ Ready to receive IoT data!")
     print("=" * 80)
     
     app.run(

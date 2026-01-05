@@ -1,16 +1,22 @@
-import React, { useState } from 'react';
-import { Calendar, Filter, Download, Search, TrendingUp, FileDown, ChevronDown, Eye, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, Filter, Download, Search, TrendingUp, FileDown, ChevronDown, Eye, Trash2, AlertCircle, CheckCircle } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { format, subDays } from 'date-fns';
 
 const History = () => {
-  const { readings, devices } = useData();
+  const { readings, devices, isLoading } = useData();
   const [filter, setFilter] = useState('all');
   const [dateRange, setDateRange] = useState('7d');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRows, setSelectedRows] = useState([]);
   const [exportFormat, setExportFormat] = useState('csv');
   const [exportLoading, setExportLoading] = useState(false);
+
+  // Get the actual timestamp field from your data
+  const getReadingTimestamp = (reading) => {
+    // Try different possible timestamp fields
+    return reading.created_at || reading.timestamp || new Date().toISOString();
+  };
 
   // Calculate date ranges
   const getDateRange = () => {
@@ -26,26 +32,38 @@ const History = () => {
 
   // Filter readings based on criteria
   const filteredReadings = readings.filter(reading => {
-    // Date filter
-    const cutoffDate = getDateRange();
-    const readingDate = new Date(reading.timestamp);
-    if (readingDate < cutoffDate) return false;
+    try {
+      // Date filter
+      const cutoffDate = getDateRange();
+      const readingDate = new Date(getReadingTimestamp(reading));
+      if (readingDate < cutoffDate) return false;
 
-    // Quality filter
-    if (filter !== 'all' && reading.quality_class !== filter) return false;
+      // Quality filter
+      if (filter !== 'all') {
+        const quality = reading.quality_flag || reading.quality_class || 'unknown';
+        if (quality.toLowerCase() !== filter.toLowerCase()) return false;
+      }
 
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      const deviceName = devices.find(d => d.id === reading.device_id)?.name || reading.device_id;
-      return (
-        deviceName.toLowerCase().includes(query) ||
-        reading.quality_class.toLowerCase().includes(query) ||
-        reading.id.toLowerCase().includes(query)
-      );
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const deviceName = devices.find(d => d.id === reading.device_id)?.name || reading.device_id;
+        const quality = reading.quality_flag || reading.quality_class || 'unknown';
+        
+        return (
+          deviceName.toLowerCase().includes(query) ||
+          quality.toLowerCase().includes(query) ||
+          reading.device_id.toLowerCase().includes(query) ||
+          (reading.temperature && reading.temperature.toString().includes(query)) ||
+          (reading.ph && reading.ph.toString().includes(query))
+        );
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error filtering reading:', error, reading);
+      return false;
     }
-
-    return true;
   });
 
   // Toggle row selection
@@ -62,7 +80,50 @@ const History = () => {
     if (selectedRows.length === filteredReadings.length) {
       setSelectedRows([]);
     } else {
-      setSelectedRows(filteredReadings.map(r => r.id));
+      setSelectedRows(filteredReadings.map(r => r.id || r.device_id + '_' + getReadingTimestamp(r)));
+    }
+  };
+
+  // Get quality display
+  const getQualityDisplay = (reading) => {
+    const quality = reading.quality_flag || reading.quality_class;
+    if (!quality) return { text: 'Unknown', class: 'unknown' };
+    
+    const qualityLower = quality.toLowerCase();
+    if (qualityLower === 'ok' || qualityLower === 'good') {
+      return { text: 'Good', class: 'good' };
+    } else if (qualityLower === 'suspect' || qualityLower === 'warning') {
+      return { text: 'Warning', class: 'warning' };
+    } else if (qualityLower === 'fail' || qualityLower === 'danger' || qualityLower === 'critical') {
+      return { text: 'Critical', class: 'critical' };
+    }
+    return { text: quality, class: 'unknown' };
+  };
+
+  // Get device name
+  const getDeviceName = (deviceId) => {
+    const device = devices.find(d => d.id === deviceId);
+    return device?.name || `Device ${deviceId}`;
+  };
+
+  // Format timestamp
+  const formatTimestamp = (timestamp) => {
+    if (!timestamp) return 'No date';
+    
+    try {
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) return 'Invalid date';
+      
+      return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return 'Date error';
     }
   };
 
@@ -73,7 +134,7 @@ const History = () => {
     try {
       // Determine which readings to export
       const exportReadings = selectedRows.length > 0 
-        ? filteredReadings.filter(r => selectedRows.includes(r.id))
+        ? filteredReadings.filter(r => selectedRows.includes(r.id || r.device_id + '_' + getReadingTimestamp(r)))
         : filteredReadings;
 
       if (exportReadings.length === 0) {
@@ -91,27 +152,25 @@ const History = () => {
         'pH Level',
         'TDS (mg/L)',
         'Turbidity (NTU)',
-        'Quality Class',
-        'Quality Score',
-        'Battery Level',
-        'Signal Strength'
+        'Quality Status',
+        'Latitude',
+        'Longitude'
       ];
 
       // Prepare CSV rows
       const rows = exportReadings.map(reading => {
-        const device = devices.find(d => d.id === reading.device_id);
+        const quality = getQualityDisplay(reading);
         return [
-          new Date(reading.timestamp).toISOString(),
-          reading.device_id,
-          device?.name || 'Unknown',
-          reading.temperature?.toFixed(2) || '',
-          reading.ph?.toFixed(2) || '',
-          reading.tds?.toFixed(0) || '',
-          reading.turbidity?.toFixed(2) || '',
-          reading.quality_class || 'unknown',
-          reading.quality_score || '',
-          device?.batteryLevel || '',
-          device?.signalStrength || ''
+          getReadingTimestamp(reading),
+          reading.device_id || 'N/A',
+          getDeviceName(reading.device_id),
+          reading.temperature?.toFixed(2) || 'N/A',
+          reading.ph?.toFixed(2) || 'N/A',
+          reading.tds?.toFixed(0) || 'N/A',
+          reading.turbidity?.toFixed(2) || 'N/A',
+          quality.text,
+          reading.latitude?.toFixed(6) || 'N/A',
+          reading.longitude?.toFixed(6) || 'N/A'
         ];
       });
 
@@ -129,7 +188,7 @@ const History = () => {
       // Generate filename
       const dateStr = format(new Date(), 'yyyy-MM-dd_HH-mm');
       const count = exportReadings.length;
-      const filename = `aquasense_history_${dateStr}_${count}_readings.csv`;
+      const filename = `water_quality_history_${dateStr}_${count}_readings.csv`;
       
       link.setAttribute('href', url);
       link.setAttribute('download', filename);
@@ -155,7 +214,7 @@ const History = () => {
     
     try {
       const exportReadings = selectedRows.length > 0 
-        ? filteredReadings.filter(r => selectedRows.includes(r.id))
+        ? filteredReadings.filter(r => selectedRows.includes(r.id || r.device_id + '_' + getReadingTimestamp(r)))
         : filteredReadings;
 
       if (exportReadings.length === 0) {
@@ -176,7 +235,10 @@ const History = () => {
           }
         },
         devices: devices,
-        readings: exportReadings
+        readings: exportReadings.map(reading => ({
+          ...reading,
+          quality_display: getQualityDisplay(reading)
+        }))
       };
 
       // Create JSON string
@@ -188,7 +250,7 @@ const History = () => {
       // Generate filename
       const dateStr = format(new Date(), 'yyyy-MM-dd_HH-mm');
       const count = exportReadings.length;
-      const filename = `aquasense_history_${dateStr}_${count}_readings.json`;
+      const filename = `water_quality_history_${dateStr}_${count}_readings.json`;
       
       link.setAttribute('href', url);
       link.setAttribute('download', filename);
@@ -221,56 +283,50 @@ const History = () => {
     setSelectedRows([]);
   };
 
-  // Get device name by ID
-  const getDeviceName = (deviceId) => {
-    const device = devices.find(d => d.id === deviceId);
-    return device?.name || deviceId;
-  };
-
-  // Format timestamp
-  const formatTimestamp = (timestamp) => {
-    return new Date(timestamp).toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  if (isLoading && readings.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin h-12 w-12 mx-auto mb-4 border-4 border-blue-500 border-t-transparent rounded-full" />
+          <p className="text-gray-600">Loading historical data...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="history-page">
       <div className="page-header">
         <div className="header-content">
-          <h1>
-            <Calendar size={28} />
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <Calendar size={28} className="text-blue-500" />
             Historical Data
           </h1>
-          <p>Analyze past water quality readings and trends</p>
+          <p className="text-gray-600">Analyze past water quality readings and trends</p>
         </div>
         
-        <div className="header-stats">
-          <div className="stat-card">
-            <span className="stat-label">Total Readings</span>
-            <span className="stat-value">{readings.length.toLocaleString()}</span>
+        <div className="header-stats flex gap-4">
+          <div className="stat-card bg-white p-4 rounded-lg shadow border">
+            <span className="stat-label text-sm text-gray-500 block">Total Readings</span>
+            <span className="stat-value text-2xl font-bold text-gray-900">{readings.length.toLocaleString()}</span>
           </div>
-          <div className="stat-card">
-            <span className="stat-label">Filtered</span>
-            <span className="stat-value">{filteredReadings.length.toLocaleString()}</span>
+          <div className="stat-card bg-white p-4 rounded-lg shadow border">
+            <span className="stat-label text-sm text-gray-500 block">Filtered</span>
+            <span className="stat-value text-2xl font-bold text-gray-900">{filteredReadings.length.toLocaleString()}</span>
           </div>
-          <div className="stat-card">
-            <span className="stat-label">Selected</span>
-            <span className="stat-value">{selectedRows.length.toLocaleString()}</span>
+          <div className="stat-card bg-white p-4 rounded-lg shadow border">
+            <span className="stat-label text-sm text-gray-500 block">Selected</span>
+            <span className="stat-value text-2xl font-bold text-gray-900">{selectedRows.length.toLocaleString()}</span>
           </div>
         </div>
       </div>
 
-      <div className="history-controls">
-        <div className="controls-left">
-          <div className="control-group">
-            <Filter size={18} />
+      <div className="history-controls bg-white p-4 rounded-lg shadow border mb-6">
+        <div className="controls-left flex flex-wrap gap-4">
+          <div className="control-group flex items-center gap-2">
+            <Filter size={18} className="text-gray-500" />
             <select 
-              className="control-select"
+              className="control-select border rounded px-3 py-2"
               value={filter} 
               onChange={(e) => setFilter(e.target.value)}
             >
@@ -281,10 +337,10 @@ const History = () => {
             </select>
           </div>
 
-          <div className="control-group">
-            <Calendar size={18} />
+          <div className="control-group flex items-center gap-2">
+            <Calendar size={18} className="text-gray-500" />
             <select 
-              className="control-select"
+              className="control-select border rounded px-3 py-2"
               value={dateRange} 
               onChange={(e) => setDateRange(e.target.value)}
             >
@@ -292,22 +348,21 @@ const History = () => {
               <option value="7d">Last 7 Days</option>
               <option value="30d">Last 30 Days</option>
               <option value="90d">Last 90 Days</option>
-              <option value="custom">Custom Range</option>
             </select>
           </div>
 
-          <div className="control-group search-group">
-            <Search size={18} />
+          <div className="control-group search-group relative">
+            <Search size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <input 
               type="search" 
-              className="search-input"
-              placeholder="Search by device or quality..." 
+              className="search-input border rounded pl-10 pr-8 py-2 w-64"
+              placeholder="Search..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
             {searchQuery && (
               <button 
-                className="clear-search"
+                className="clear-search absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 onClick={() => setSearchQuery('')}
               >
                 ×
@@ -316,19 +371,19 @@ const History = () => {
           </div>
         </div>
 
-        <div className="controls-right">
+        <div className="controls-right mt-4 sm:mt-0 flex flex-wrap gap-3">
           {selectedRows.length > 0 && (
             <button 
-              className="btn secondary"
+              className="btn secondary bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded"
               onClick={clearSelections}
             >
               Clear Selection ({selectedRows.length})
             </button>
           )}
           
-          <div className="export-controls">
+          <div className="export-controls flex items-center gap-2">
             <select 
-              className="format-select"
+              className="format-select border rounded px-3 py-2"
               value={exportFormat}
               onChange={(e) => setExportFormat(e.target.value)}
             >
@@ -337,13 +392,13 @@ const History = () => {
             </select>
             
             <button 
-              className={`btn primary export-btn ${exportLoading ? 'loading' : ''}`}
+              className={`btn primary bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 ${exportLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={handleExport}
               disabled={exportLoading || filteredReadings.length === 0}
             >
               {exportLoading ? (
                 <>
-                  <div className="spinner"></div>
+                  <div className="spinner h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                   Exporting...
                 </>
               ) : (
@@ -354,294 +409,147 @@ const History = () => {
                 </>
               )}
             </button>
-            
-            <div className="export-dropdown">
-              <button className="export-options-btn">
-                <ChevronDown size={16} />
-              </button>
-              <div className="dropdown-menu">
-                <button 
-                  className="dropdown-item"
-                  onClick={exportToCSV}
-                >
-                  <FileDown size={16} />
-                  Export as CSV
-                </button>
-                <button 
-                  className="dropdown-item"
-                  onClick={exportToJSON}
-                >
-                  <FileDown size={16} />
-                  Export as JSON
-                </button>
-                <div className="dropdown-divider"></div>
-                <button className="dropdown-item">
-                  <TrendingUp size={16} />
-                  Generate Report
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="history-content">
-        <div className="history-table-container">
-          <div className="table-header">
-            <div className="table-controls">
-              <div className="select-all">
+        <div className="history-table-container bg-white rounded-lg shadow border overflow-hidden">
+          <div className="table-header p-4 border-b">
+            <div className="table-controls flex justify-between items-center">
+              <div className="select-all flex items-center gap-2">
                 <input 
                   type="checkbox"
                   id="select-all"
                   checked={selectedRows.length === filteredReadings.length && filteredReadings.length > 0}
                   onChange={toggleAllRows}
+                  className="h-4 w-4"
                 />
-                <label htmlFor="select-all">Select All</label>
+                <label htmlFor="select-all" className="text-sm text-gray-600">Select All</label>
               </div>
-              <span className="table-info">
+              <span className="table-info text-sm text-gray-600">
                 Showing {filteredReadings.length} of {readings.length} readings
               </span>
             </div>
-            <div className="table-actions">
-              <button 
-                className="btn-sm"
-                onClick={() => window.print()}
-              >
-                <FileDown size={16} />
-                Print View
-              </button>
-            </div>
           </div>
 
-          <div className="table-scroll">
-            <table className="history-table">
-              <thead>
+          <div className="table-scroll overflow-x-auto">
+            <table className="history-table min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
                 <tr>
-                  <th className="select-column">
+                  <th className="select-column px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     <input 
                       type="checkbox"
                       checked={selectedRows.length === filteredReadings.length && filteredReadings.length > 0}
                       onChange={toggleAllRows}
+                      className="h-4 w-4"
                     />
                   </th>
-                  <th>Timestamp</th>
-                  <th>Device</th>
-                  <th>Temperature</th>
-                  <th>pH</th>
-                  <th>TDS</th>
-                  <th>Turbidity</th>
-                  <th>Quality</th>
-                  <th>Actions</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Device</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Temperature</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">pH</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">TDS</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Turbidity</th>
+                  
+                 
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="bg-white divide-y divide-gray-200">
                 {filteredReadings.length === 0 ? (
-                  <tr className="empty-row">
-                    <td colSpan="9">
-                      <div className="empty-state">
-                        <Search size={48} />
-                        <h4>No readings found</h4>
-                        <p>Try adjusting your filters or search query</p>
+                  <tr>
+                    <td colSpan="9" className="px-6 py-12 text-center">
+                      <div className="empty-state flex flex-col items-center">
+                        <Search size={48} className="text-gray-300 mb-4" />
+                        <h4 className="text-lg font-medium text-gray-900 mb-2">No readings found</h4>
+                        <p className="text-gray-500">Try adjusting your filters or search query</p>
                       </div>
                     </td>
                   </tr>
                 ) : (
-                  filteredReadings.map((reading) => (
-                    <tr 
-                      key={reading.id}
-                      className={selectedRows.includes(reading.id) ? 'selected' : ''}
-                    >
-                      <td className="select-column">
-                        <input 
-                          type="checkbox"
-                          checked={selectedRows.includes(reading.id)}
-                          onChange={() => toggleRowSelection(reading.id)}
-                        />
-                      </td>
-                      <td className="timestamp">
-                        <div className="time-primary">
-                          {formatTimestamp(reading.timestamp)}
-                        </div>
-                        <div className="time-secondary">
-                          {new Date(reading.timestamp).toLocaleTimeString([], { 
-                            hour: '2-digit', 
-                            minute: '2-digit' 
-                          })}
-                        </div>
-                      </td>
-                      <td className="device-cell">
-                        <div className="device-icon">
-                          {getDeviceName(reading.device_id).charAt(0)}
-                        </div>
-                        <div className="device-info">
-                          <span className="device-name">{getDeviceName(reading.device_id)}</span>
-                          <span className="device-id">{reading.device_id}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <span className={`value ${reading.temperature > 25 ? 'warning' : ''}`}>
-                          {reading.temperature?.toFixed(1)}°C
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`value ${reading.ph < 6.5 || reading.ph > 8.5 ? 'warning' : ''}`}>
-                          {reading.ph?.toFixed(1)}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`value ${reading.tds > 250 ? 'warning' : ''}`}>
+                  filteredReadings.map((reading) => {
+                    const readingId = reading.id || reading.device_id + '_' + getReadingTimestamp(reading);
+                    const quality = getQualityDisplay(reading);
+                    const isSelected = selectedRows.includes(readingId);
+                    
+                    return (
+                      <tr 
+                        key={readingId}
+                        className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}
+                      >
+                        <td className="select-column px-6 py-4 whitespace-nowrap">
+                          <input 
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleRowSelection(readingId)}
+                            className="h-4 w-4"
+                          />
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            {formatTimestamp(getReadingTimestamp(reading))}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 h-10 w-10">
+                              <div className="h-10 w-10 rounded-lg bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold">
+                                {getDeviceName(reading.device_id).charAt(0)}
+                              </div>
+                            </div>
+                            <div className="ml-4">
+                              <div className="text-sm font-medium text-gray-900">
+                                {getDeviceName(reading.device_id)}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                {reading.device_id}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className={`text-sm ${reading.temperature > 25 ? 'text-orange-600 font-medium' : 'text-gray-900'}`}>
+                            {reading.temperature?.toFixed(1)}°C
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className={`text-sm ${reading.ph < 6.5 || reading.ph > 8.5 ? 'text-orange-600 font-medium' : 'text-gray-900'}`}>
+                            {reading.ph?.toFixed(1)}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {reading.tds?.toFixed(0)} mg/L
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`value ${reading.turbidity > 5 ? 'warning' : ''}`}>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {reading.turbidity?.toFixed(1)} NTU
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`quality-badge ${reading.quality_class}`}>
-                          {reading.quality_class?.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="action-cell">
-                        <div className="action-buttons">
+                        </td>
+                       
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <button 
-                            className="action-btn view-btn"
-                            onClick={() => console.log('View details:', reading.id)}
+                            className="text-blue-600 hover:text-blue-900 mr-3"
+                            onClick={() => console.log('View details:', readingId)}
                             title="View Details"
                           >
-                            <Eye size={16} />
+                           
                           </button>
                           <button 
-                            className="action-btn delete-btn"
+                            className="text-red-600 hover:text-red-900"
                             onClick={() => {
                               if (window.confirm('Are you sure you want to delete this reading?')) {
-                                console.log('Delete reading:', reading.id);
+                                console.log('Delete reading:', readingId);
                               }
                             }}
                             title="Delete Reading"
                           >
-                            <Trash2 size={16} />
+                            
                           </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
-          </div>
-
-          <div className="table-footer">
-            <div className="pagination">
-              <button className="pagination-btn" disabled>
-                Previous
-              </button>
-              <div className="page-numbers">
-                <span className="page-number active">1</span>
-                <span className="page-number">2</span>
-                <span className="page-number">3</span>
-                <span className="page-dots">...</span>
-                <span className="page-number">10</span>
-              </div>
-              <button className="pagination-btn">
-                Next
-              </button>
-            </div>
-            <div className="results-info">
-              Showing 1-{Math.min(filteredReadings.length, 20)} of {filteredReadings.length} results
-            </div>
-          </div>
-        </div>
-
-        <div className="history-sidebar">
-          <div className="sidebar-card">
-            <h3>
-              <TrendingUp size={20} />
-              Export Options
-            </h3>
-            <div className="export-settings">
-              <div className="setting-group">
-                <label>Export Format</label>
-                <div className="format-options">
-                  <button 
-                    className={`format-option ${exportFormat === 'csv' ? 'active' : ''}`}
-                    onClick={() => setExportFormat('csv')}
-                  >
-                    CSV
-                  </button>
-                  <button 
-                    className={`format-option ${exportFormat === 'json' ? 'active' : ''}`}
-                    onClick={() => setExportFormat('json')}
-                  >
-                    JSON
-                  </button>
-                </div>
-              </div>
-              
-              <div className="setting-group">
-                <label>Date Range</label>
-                <div className="date-display">
-                  {format(getDateRange(), 'MMM dd, yyyy')} - {format(new Date(), 'MMM dd, yyyy')}
-                </div>
-              </div>
-              
-              <div className="setting-group">
-                <label>Selected Readings</label>
-                <div className="selected-count">
-                  {selectedRows.length} of {filteredReadings.length} selected
-                </div>
-                {selectedRows.length > 0 && (
-                  <button 
-                    className="btn-sm secondary"
-                    onClick={clearSelections}
-                  >
-                    Clear Selection
-                  </button>
-                )}
-              </div>
-              
-              <div className="setting-group">
-                <label>Export Preview</label>
-                <div className="export-preview">
-                  <div className="preview-item">
-                    <span>Total Records:</span>
-                    <span>{selectedRows.length || filteredReadings.length}</span>
-                  </div>
-                  <div className="preview-item">
-                    <span>File Size:</span>
-                    <span>~{(selectedRows.length || filteredReadings.length) * 0.5} KB</span>
-                  </div>
-                  <div className="preview-item">
-                    <span>Includes:</span>
-                    <span>Reading data, timestamps, device info</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <button 
-              className={`btn primary export-sidebar-btn ${exportLoading ? 'loading' : ''}`}
-              onClick={handleExport}
-              disabled={exportLoading || filteredReadings.length === 0}
-            >
-              {exportLoading ? (
-                <>
-                  <div className="spinner"></div>
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Download size={18} />
-                  Download Export
-                </>
-              )}
-            </button>
-            
-            <p className="export-note">
-              Exported files include all reading data with timestamps and device information.
-              CSV format is recommended for spreadsheet applications.
-            </p>
           </div>
         </div>
       </div>

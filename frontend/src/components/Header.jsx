@@ -70,8 +70,8 @@ const Header = ({ onMenuClick, sidebarOpen }) => {
                 <span className="brand-gradient">AquaCheck</span> Water Conditioning
               </h1>
               <p className="brand-subtitle">
-                <Globe size={12} />
-                <span>IoT Water Monitoring System</span>
+               
+                
                 <span className="status-dot live"></span>
                 <span className="status-text">Live</span>
               </p>
@@ -82,29 +82,10 @@ const Header = ({ onMenuClick, sidebarOpen }) => {
         <div className="header-right">
           {/* System Status */}
           <div className="system-status">
-            <div className="status-item">
-              <div className="status-icon">
-                <Wifi size={16} className={statistics.devicesOnline > 0 ? 'online' : 'offline'} />
-              </div>
-              <div className="status-details">
-                <span className="status-value">{statistics.devicesOnline}</span>
-                <span className="status-label">Online</span>
-              </div>
-            </div>
             
            
             
-            <div className="status-item">
-              <div className="status-icon">
-                <Clock size={16} />
-              </div>
-              <div className="status-details">
-                <span className="status-value">
-                  {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-                <span className="status-label">System Time</span>
-              </div>
-            </div>
+           
           </div>
 
           {/* Divider */}
@@ -275,17 +256,10 @@ const Header = ({ onMenuClick, sidebarOpen }) => {
             </span>
           </div>
           <div className="stat-item">
-            <span className="stat-label">Uptime:</span>
-            <span className="stat-value success">99.8%</span>
-          </div>
-          <div className="stat-item">
             <span className="stat-label">Data Points:</span>
             <span className="stat-value">{statistics.total_readings?.toLocaleString() || '0'}</span>
           </div>
-          <div className="stat-item">
-            <span className="stat-label">Avg Response:</span>
-            <span className="stat-value">42ms</span>
-          </div>
+          
         </div>
 
         <div className="system-health">

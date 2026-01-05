@@ -1,9 +1,7 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
-from sqlalchemy import func
 import logging
-from app import db
-from app.models import SensorReading, Device
+from services.supabase_service import supabase_service  # Import Supabase service
 
 api_bp = Blueprint('api', __name__)
 logger = logging.getLogger(__name__)
@@ -16,12 +14,28 @@ logger = logging.getLogger(__name__)
 @api_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({
-        'status': 'ok',
-        'timestamp': datetime.utcnow().isoformat(),
-        'service': 'Water Quality API',
-        'version': '1.0.0'
-    }), 200
+    try:
+        # Test Supabase connection
+        stats = supabase_service.get_statistics()
+        
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.utcnow().isoformat(),
+            'service': 'Water Quality API',
+            'version': '1.0.0',
+            'database': 'Supabase',
+            'stats': {
+                'total_readings': stats['total_readings'],
+                'unique_devices': stats['unique_devices']
+            }
+        }), 200
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            'status': 'unhealthy',
+            'timestamp': datetime.utcnow().isoformat(),
+            'error': str(e)
+        }), 500
 
 
 # ============================================================================
@@ -50,47 +64,46 @@ def receive_sensor_data():
         if not data or 'device_id' not in data:
             return jsonify({'error': 'device_id is required'}), 400
         
-        # Create sensor reading
-        reading = SensorReading(
-            device_id=data['device_id'],
-            temperature=data.get('temperature'),
-            ph=data.get('ph'),
-            tds=data.get('tds'),
-            turbidity=data.get('turbidity'),
-            latitude=data.get('latitude'),
-            longitude=data.get('longitude'),
-            quality_flag='OK'
-        )
+        # Validate required fields
+        required_fields = ['device_id', 'temperature', 'ph', 'tds', 'turbidity', 'latitude', 'longitude']
+        missing_fields = [field for field in required_fields if field not in data]
         
-        db.session.add(reading)
-        db.session.commit()
+        if missing_fields:
+            return jsonify({
+                'error': f'Missing required fields: {missing_fields}',
+                'received': data
+            }), 400
         
-        # Update device last reading
-        device = Device.query.get(data['device_id'])
-        if not device:
-            device = Device(
-                id=data['device_id'],
-                name=f"Device {data['device_id']}",
-                latitude=data.get('latitude'),
-                longitude=data.get('longitude'),
-                status='active'
-            )
-            db.session.add(device)
-        device.last_reading = datetime.utcnow()
-        db.session.commit()
+        # Prepare data for Supabase
+        reading_data = {
+            'device_id': str(data['device_id']),
+            'temperature': float(data['temperature']),
+            'ph': float(data['ph']),
+            'tds': int(float(data['tds'])),
+            'turbidity': float(data['turbidity']),
+            'latitude': float(data['latitude']),
+            'longitude': float(data['longitude'])
+        }
         
-        logger.info(f"✅ Data received from {data['device_id']} (ID: {reading.id})")
+        # Create reading in Supabase
+        reading = supabase_service.create_reading(reading_data)
+        
+        # Determine water quality
+        quality = supabase_service.determine_water_quality(reading_data)
+        
+        logger.info(f"✅ Data received from {data['device_id']} (Quality: {quality})")
         
         return jsonify({
             'success': True,
-            'id': reading.id,
-            'message': 'Data saved successfully',
-            'timestamp': reading.timestamp.isoformat() if reading.timestamp else None
+            'id': reading['id'],
+            'message': 'Data saved successfully in Supabase',
+            'quality': quality,
+            'timestamp': reading['created_at'],
+            'data': reading
         }), 201
         
     except Exception as e:
         logger.error(f"❌ Error receiving data: {str(e)}")
-        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 
@@ -110,19 +123,26 @@ def get_readings():
     try:
         limit = request.args.get('limit', 10, type=int)
         device_id = request.args.get('device_id', None)
+        offset = request.args.get('offset', 0, type=int)
         
-        query = SensorReading.query
+        # Get readings from Supabase
+        readings = supabase_service.get_readings(limit=limit, offset=offset)
         
+        # Filter by device if specified
         if device_id:
-            query = query.filter_by(device_id=device_id)
+            readings = [r for r in readings if r['device_id'] == device_id]
         
-        readings = query.order_by(SensorReading.timestamp.desc()).limit(limit).all()
+        # Add quality analysis
+        for reading in readings:
+            reading['quality'] = supabase_service.determine_water_quality(reading)
         
         logger.info(f"Retrieved {len(readings)} readings")
         
         return jsonify({
             'count': len(readings),
-            'readings': [r.to_dict() for r in readings]
+            'limit': limit,
+            'offset': offset,
+            'readings': readings
         }), 200
         
     except Exception as e:
@@ -141,27 +161,38 @@ def get_historical_data():
     try:
         days = request.args.get('days', 7, type=int)
         
+        # Calculate date range
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=days)
         
-        readings = SensorReading.query.filter(
-            SensorReading.timestamp >= start_date,
-            SensorReading.timestamp <= end_date
-        ).order_by(SensorReading.timestamp.desc()).all()
+        # Get all readings (we'll filter by date in code for simplicity)
+        # In production, you'd want to add date filtering to Supabase query
+        readings = supabase_service.get_readings(limit=1000)  # Get more readings
+        
+        # Filter by date
+        filtered_readings = []
+        for reading in readings:
+            if 'created_at' in reading:
+                reading_date = datetime.fromisoformat(reading['created_at'].replace('Z', '+00:00'))
+                if start_date <= reading_date <= end_date:
+                    # Add quality
+                    reading['quality'] = supabase_service.determine_water_quality(reading)
+                    filtered_readings.append(reading)
         
         # Group by date
         data_by_date = {}
-        for reading in readings:
-            date_key = reading.timestamp.strftime('%Y-%m-%d') if reading.timestamp else 'unknown'
-            if date_key not in data_by_date:
-                data_by_date[date_key] = []
-            data_by_date[date_key].append(reading.to_dict())
+        for reading in filtered_readings:
+            if 'created_at' in reading:
+                date_key = reading['created_at'][:10]  # Extract YYYY-MM-DD
+                if date_key not in data_by_date:
+                    data_by_date[date_key] = []
+                data_by_date[date_key].append(reading)
         
-        logger.info(f"Retrieved {len(readings)} historical readings")
+        logger.info(f"Retrieved {len(filtered_readings)} historical readings")
         
         return jsonify({
             'days': days,
-            'count': len(readings),
+            'count': len(filtered_readings),
             'data': data_by_date
         }), 200
         
@@ -178,54 +209,18 @@ def get_historical_data():
 def get_statistics():
     """Get basic statistics about stored readings"""
     try:
-        readings = SensorReading.query.all()
-        
-        if not readings:
-            return jsonify({
-                'total_readings': 0,
-                'devices': 0,
-                'temperature': {'min': None, 'max': None, 'avg': None, 'count': 0},
-                'ph': {'min': None, 'max': None, 'avg': None, 'count': 0},
-                'tds': {'min': None, 'max': None, 'avg': None, 'count': 0},
-                'turbidity': {'min': None, 'max': None, 'avg': None, 'count': 0},
-                'quality_flags': {'ok': 0, 'suspect': 0, 'fail': 0}
-            }), 200
-        
-        # Calculate statistics
-        temps = [r.temperature for r in readings if r.temperature is not None]
-        phs = [r.ph for r in readings if r.ph is not None]
-        tdss = [r.tds for r in readings if r.tds is not None]
-        turbidities = [r.turbidity for r in readings if r.turbidity is not None]
-        
-        def get_stats(values):
-            if not values:
-                return {'min': None, 'max': None, 'avg': None, 'count': 0}
-            return {
-                'min': round(min(values), 2),
-                'max': round(max(values), 2),
-                'avg': round(sum(values) / len(values), 2),
-                'count': len(values)
-            }
-        
-        stats = {
-            'total_readings': len(readings),
-            'devices': len(set(r.device_id for r in readings)),
-            'temperature': get_stats(temps),
-            'ph': get_stats(phs),
-            'tds': get_stats(tdss),
-            'turbidity': get_stats(turbidities),
-            'quality_flags': {
-                'ok': sum(1 for r in readings if r.quality_flag == 'OK'),
-                'suspect': sum(1 for r in readings if r.quality_flag == 'SUSPECT'),
-                'fail': sum(1 for r in readings if r.quality_flag == 'FAIL'),
-            }
-        }
+        stats = supabase_service.get_statistics()
         
         return jsonify(stats), 200
         
     except Exception as e:
         logger.error(f"❌ Error calculating statistics: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'error': str(e),
+            'total_readings': 0,
+            'unique_devices': 0,
+            'quality_summary': {'good': 0, 'warning': 0, 'danger': 0}
+        }), 500
 
 
 # ============================================================================
@@ -243,29 +238,26 @@ def get_heatmap_data():
     try:
         days = request.args.get('days', 7, type=int)
         
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-        
-        readings = SensorReading.query.filter(
-            SensorReading.timestamp >= start_date,
-            SensorReading.timestamp <= end_date
-        ).all()
+        # Get latest readings for each device
+        latest_readings = supabase_service.get_latest_readings()
         
         # Create heatmap data points
         heatmap_data = []
-        for reading in readings:
-            if reading.latitude and reading.longitude:
+        for reading in latest_readings:
+            if reading.get('latitude') and reading.get('longitude'):
+                quality = supabase_service.determine_water_quality(reading)
+                
                 heatmap_data.append({
-                    'lat': reading.latitude,
-                    'lng': reading.longitude,
-                    'value': reading.quality_score if reading.quality_score else 0.5,
-                    'quality_flag': reading.quality_flag,
-                    'device_id': reading.device_id,
-                    'temperature': reading.temperature,
-                    'ph': reading.ph,
-                    'tds': reading.tds,
-                    'turbidity': reading.turbidity,
-                    'timestamp': reading.timestamp.isoformat() if reading.timestamp else None
+                    'lat': reading['latitude'],
+                    'lng': reading['longitude'],
+                    'value': 1.0 if quality == 'good' else 0.5 if quality == 'warning' else 0.1,
+                    'quality': quality,
+                    'device_id': reading['device_id'],
+                    'temperature': reading.get('temperature'),
+                    'ph': reading.get('ph'),
+                    'tds': reading.get('tds'),
+                    'turbidity': reading.get('turbidity'),
+                    'timestamp': reading.get('created_at')
                 })
         
         logger.info(f"Retrieved {len(heatmap_data)} heatmap points")
@@ -289,30 +281,36 @@ def get_heatmap_data():
 def get_alerts():
     """Get current alerts based on quality flags"""
     try:
-        failed_readings = SensorReading.query.filter_by(quality_flag='FAIL').all()
-        suspect_readings = SensorReading.query.filter_by(quality_flag='SUSPECT').all()
+        # Get all readings
+        readings = supabase_service.get_readings(limit=100)
         
         alerts = []
         
-        for reading in failed_readings:
-            alerts.append({
-                'id': f"alert_{reading.id}",
-                'severity': 'critical',
-                'message': f"Critical water quality issue at {reading.device_id}",
-                'timestamp': reading.timestamp.isoformat() if reading.timestamp else None,
-                'resolved': False,
-                'reading_id': reading.id
-            })
-        
-        for reading in suspect_readings:
-            alerts.append({
-                'id': f"alert_{reading.id}_suspect",
-                'severity': 'warning',
-                'message': f"Suspect water quality at {reading.device_id}",
-                'timestamp': reading.timestamp.isoformat() if reading.timestamp else None,
-                'resolved': False,
-                'reading_id': reading.id
-            })
+        for reading in readings:
+            quality = supabase_service.determine_water_quality(reading)
+            
+            if quality == 'danger':
+                alerts.append({
+                    'id': f"alert_{reading['id']}",
+                    'severity': 'critical',
+                    'message': f"Critical water quality issue at {reading['device_id']}",
+                    'timestamp': reading.get('created_at'),
+                    'resolved': False,
+                    'reading_id': reading['id'],
+                    'device_id': reading['device_id'],
+                    'quality': quality
+                })
+            elif quality == 'warning':
+                alerts.append({
+                    'id': f"alert_{reading['id']}_suspect",
+                    'severity': 'warning',
+                    'message': f"Suspect water quality at {reading['device_id']}",
+                    'timestamp': reading.get('created_at'),
+                    'resolved': False,
+                    'reading_id': reading['id'],
+                    'device_id': reading['device_id'],
+                    'quality': quality
+                })
         
         logger.info(f"Retrieved {len(alerts)} alerts")
         
@@ -354,15 +352,32 @@ def update_alert_status(alert_id):
 def get_devices():
     """Get list of all devices"""
     try:
-        devices = Device.query.all()
+        stats = supabase_service.get_statistics()
         
-        device_list = [d.to_dict() for d in devices]
+        devices = []
+        for device_id in stats['device_list']:
+            # Get latest reading for this device
+            readings = supabase_service.get_readings(limit=1)
+            latest = None
+            for reading in readings:
+                if reading['device_id'] == device_id:
+                    latest = reading
+                    break
+            
+            devices.append({
+                'id': device_id,
+                'name': f"Device {device_id}",
+                'status': 'active',
+                'last_seen': latest['created_at'] if latest else None,
+                'latitude': latest['latitude'] if latest else None,
+                'longitude': latest['longitude'] if latest else None
+            })
         
-        logger.info(f"Retrieved {len(device_list)} devices")
+        logger.info(f"Retrieved {len(devices)} devices")
         
         return jsonify({
-            'count': len(device_list),
-            'devices': device_list
+            'count': len(devices),
+            'devices': devices
         }), 200
         
     except Exception as e:
@@ -376,30 +391,18 @@ def update_device(device_id):
     try:
         data = request.get_json()
         
-        device = Device.query.get(device_id)
-        if not device:
-            return jsonify({'error': f'Device {device_id} not found'}), 404
-        
-        if 'name' in data:
-            device.name = data['name']
-        if 'location' in data:
-            device.location = data['location']
-        if 'status' in data:
-            device.status = data['status']
-        
-        db.session.commit()
-        
-        logger.info(f"✅ Device {device_id} updated")
+        # Note: In Supabase, we'd need a separate devices table
+        # For now, we'll just log the update
+        logger.info(f"✅ Device {device_id} update requested: {data}")
         
         return jsonify({
             'success': True,
             'device_id': device_id,
-            'device': device.to_dict()
+            'message': 'Device update logged (full implementation requires devices table)'
         }), 200
         
     except Exception as e:
         logger.error(f"❌ Error updating device: {str(e)}")
-        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 
@@ -411,14 +414,19 @@ def update_device(device_id):
 def get_latest_reading(device_id):
     """Get latest reading from specific device"""
     try:
-        reading = SensorReading.query.filter_by(device_id=device_id).order_by(
-            SensorReading.timestamp.desc()
-        ).first()
+        # Get all readings and filter
+        readings = supabase_service.get_readings(limit=100)
         
-        if not reading:
+        device_readings = [r for r in readings if r['device_id'] == device_id]
+        
+        if not device_readings:
             return jsonify({'error': f'No readings for device {device_id}'}), 404
         
-        return jsonify(reading.to_dict()), 200
+        # Get latest
+        latest = max(device_readings, key=lambda x: x.get('created_at', ''))
+        latest['quality'] = supabase_service.determine_water_quality(latest)
+        
+        return jsonify(latest), 200
         
     except Exception as e:
         logger.error(f"❌ Error: {str(e)}")
@@ -430,22 +438,40 @@ def get_device_readings(device_id):
     """Get readings for specific device"""
     try:
         limit = request.args.get('limit', 50, type=int)
-        days = request.args.get('days', None, type=int)
         
-        query = SensorReading.query.filter_by(device_id=device_id)
+        # Get all readings and filter
+        readings = supabase_service.get_readings(limit=1000)
+        device_readings = [r for r in readings if r['device_id'] == device_id]
         
-        if days:
-            start_date = datetime.utcnow() - timedelta(days=days)
-            query = query.filter(SensorReading.timestamp >= start_date)
+        # Apply limit
+        device_readings = device_readings[:limit]
         
-        readings = query.order_by(SensorReading.timestamp.desc()).limit(limit).all()
+        # Add quality
+        for reading in device_readings:
+            reading['quality'] = supabase_service.determine_water_quality(reading)
         
         return jsonify({
             'device_id': device_id,
-            'count': len(readings),
-            'readings': [r.to_dict() for r in readings]
+            'count': len(device_readings),
+            'readings': device_readings
         }), 200
         
     except Exception as e:
         logger.error(f"❌ Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# SIMPLE TEST ENDPOINT
+# ============================================================================
+
+@api_bp.route('/test', methods=['GET'])
+def test_endpoint():
+    """Simple test endpoint"""
+    return jsonify({
+        'status': 'online',
+        'service': 'Water Quality API',
+        'backend': 'Flask + Supabase',
+        'timestamp': datetime.utcnow().isoformat(),
+        'message': 'API is working!'
+    }), 200

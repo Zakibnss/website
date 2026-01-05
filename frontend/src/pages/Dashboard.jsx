@@ -208,10 +208,8 @@ const Dashboard = () => {
 
   // Dashboard tabs
   const tabs = [
-    { id: 'overview', label: 'Overview', icon: <Activity size={16} /> },
-    { id: 'analytics', label: 'Analytics', icon: <BarChart3 size={16} /> },
-    { id: 'alerts', label: 'Alerts', icon: <Bell size={16} /> },
-    { id: 'reports', label: 'Reports', icon: <Download size={16} /> }
+    { id: 'overview', label: 'Overview', icon: <Activity size={16} /> }
+
   ];
 
   // Filtered readings
@@ -275,28 +273,13 @@ const Dashboard = () => {
                 onClick={handleExportData}
                 title="Export current data"
               >
-                <Download size={18} />
-                <span>Export</span>
+                
+                
               </button>
-              <button 
-                className="btn btn-ghost"
-                onClick={() => setFilterStatus(filterStatus === 'all' ? 'warning' : 'all')}
-                title="Filter data by status"
-              >
-                <Filter size={18} />
-                <span>Filters</span>
-              </button>
+             
             </div>
             
-            <div className="time-selector">
-              <Clock size={16} />
-              <select className="time-select" aria-label="Time range selector">
-                <option value="24h">Last 24 hours</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-                <option value="custom">Custom range</option>
-              </select>
-            </div>
+           
           </div>
         </div>
         
@@ -332,7 +315,7 @@ const Dashboard = () => {
       <div className="quality-section">
         <div className="section-header">
           <h2>
-            <span className="section-icon">🌊</span>
+            
             Water Quality Overview
           </h2>
           <button className="btn-text">
@@ -349,7 +332,7 @@ const Dashboard = () => {
       <div className="statistics-section">
         <div className="section-header">
           <h2>
-            <span className="section-icon">📊</span>
+            
             Performance Metrics
           </h2>
           <span className="last-update">
@@ -490,76 +473,10 @@ const Dashboard = () => {
         </div>
 
         {/* Quick Actions */}
-        <div className="dashboard-card">
-          <div className="card-header">
-            <h3>
-              <Zap size={20} />
-              Quick Actions
-            </h3>
-            <span className="card-subtitle">Common tasks</span>
-          </div>
-          
-          <div className="card-content">
-            <div className="quick-actions-grid">
-              {quickActions.map((action) => (
-                <button
-                  key={action.id}
-                  className="action-card"
-                  onClick={action.action}
-                  style={{ '--action-color': action.color }}
-                  aria-label={action.description}
-                >
-                  <div className="action-icon" style={{ backgroundColor: `${action.color}20` }}>
-                    {action.icon}
-                  </div>
-                  <div className="action-content">
-                    <h4>{action.title}</h4>
-                    <p>{action.description}</p>
-                  </div>
-                  <div className="action-arrow">
-                    <ChevronRight size={16} />
-                  </div>
-                </button>
-              ))}
-            </div>
-            
-            {/* System Status */}
-            <div className="system-status">
-              <h4>System Status</h4>
-              <div className="status-items">
-                <div className="status-item">
-                  <div className="status-info">
-                    <div className="status-icon online">
-                      <Wifi size={16} />
-                    </div>
-                    <span>Network</span>
-                  </div>
-                  <div className="status-value">Stable</div>
-                </div>
-                <div className="status-item">
-                  <div className="status-info">
-                    <div className={`status-icon ${alertsToday > 0 ? 'warning' : 'online'}`}>
-                      <Bell size={16} />
-                    </div>
-                    <span>Alerts</span>
-                  </div>
-                  <div className="status-value">{alertsToday} Active</div>
-                </div>
-                <div className="status-item">
-                  <div className="status-info">
-                    <div className="status-icon normal">
-                      <Shield size={16} />
-                    </div>
-                    <span>Security</span>
-                  </div>
-                  <div className="status-value">Protected</div>
-                </div>
-              </div>
-            </div>
-          </div>
+       
         </div>
       </div>
-    </div>
+    
   );
 };
 
